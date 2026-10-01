@@ -1,0 +1,1214 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>互動溫習遊戲平台</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            background-color: #f0fdf4;
+            color: #1f2937;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.05);
+        }
+        .btn-press {
+            transition: all 0.1s;
+        }
+        .btn-press:active {
+            transform: scale(0.95);
+        }
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+        
+        /* 答錯的震動 */
+        .shake { animation: shake 0.5s; }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            20%, 60% { transform: translateX(-5px); }
+            40%, 80% { transform: translateX(5px); }
+        }
+
+        /* 戰鬥動畫：攻擊者衝刺 */
+        @keyframes dash-right {
+            0% { transform: translateX(0) scale(1); }
+            40% { transform: translateX(-40px) scale(1.1); }
+            100% { transform: translateX(300px) scale(1.3); opacity: 0; }
+        }
+        
+        /* 戰鬥動畫：受擊者震動與泛紅 */
+        @keyframes take-damage {
+            0%, 100% { transform: translateX(0); filter: drop-shadow(0 0 0 rgba(255,0,0,0)); }
+            20% { transform: translateX(-20px); filter: drop-shadow(0 0 30px rgba(255,0,0,1)); }
+            40% { transform: translateX(20px); filter: drop-shadow(0 0 20px rgba(255,0,0,0.8)); }
+            60% { transform: translateX(-15px); filter: drop-shadow(0 0 30px rgba(255,0,0,1)); }
+            80% { transform: translateX(15px); filter: drop-shadow(0 0 20px rgba(255,0,0,0.8)); }
+        }
+
+        .anim-attack { animation: dash-right 0.5s forwards ease-in; }
+        .anim-damage { animation: take-damage 0.6s forwards ease-in-out; }
+        
+        /* 低血量警告動畫 */
+        @keyframes pulse-danger {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; box-shadow: 0 0 10px red; border-color: red;}
+        }
+        .danger-hp { animation: pulse-danger 1.5s infinite; border-color: #f87171 !important; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <!-- 頂部導航 -->
+    <header class="bg-green-600 text-white p-4 shadow-md sticky top-0 z-50">
+        <div class="max-w-6xl mx-auto flex justify-between items-center">
+            <h1 class="text-2xl font-bold tracking-wider cursor-pointer" onclick="appState.navigate('role-selection')">🚀 智趣溫習平台</h1>
+            <div id="user-info" class="text-sm opacity-80 hidden"></div>
+        </div>
+    </header>
+
+    <!-- 主容器 -->
+    <main class="flex-grow flex items-center justify-center p-4 max-w-6xl mx-auto w-full">
+        
+        <div id="view-role-selection" class="view-section w-full max-w-md mx-auto text-center space-y-6">
+            <h2 class="text-3xl font-bold text-green-800 mb-8">請選擇你的身分</h2>
+            <button onclick="appState.navigate('teacher-dashboard')" class="btn-press w-full bg-blue-500 hover:bg-blue-600 text-white text-xl font-bold py-6 px-4 rounded-2xl shadow-lg flex flex-col items-center justify-center gap-2">
+                <span class="text-4xl">👨‍🏫</span>
+                我是老師
+            </button>
+            <button onclick="appState.navigate('student-join')" class="btn-press w-full bg-orange-500 hover:bg-orange-600 text-white text-xl font-bold py-6 px-4 rounded-2xl shadow-lg flex flex-col items-center justify-center gap-2">
+                <span class="text-4xl">🎓</span>
+                我是學生
+            </button>
+        </div>
+
+        <div id="view-teacher-dashboard" class="view-section hidden w-full space-y-6">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-3xl font-bold text-gray-800">👨‍🏫 老師主控台</h2>
+                <button onclick="appState.navigate('role-selection')" class="text-gray-500 hover:text-gray-700 underline">返回首頁</button>
+            </div>
+            
+            <div class="grid md:grid-cols-2 gap-6">
+                <!-- 題庫管理 -->
+                <div class="glass-panel p-6 rounded-2xl">
+                    <h3 class="text-xl font-bold mb-4 border-b pb-2">📚 我的題庫</h3>
+                    <div id="question-sets-list" class="space-y-3 mb-4 max-h-60 overflow-y-auto no-scrollbar">
+                        <div class="text-center text-gray-400 py-4">載入中...</div>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="appState.navigate('teacher-create-set')" class="flex-1 bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-2 rounded-xl transition text-sm">
+                            + 手動新增
+                        </button>
+                        <label class="flex-1 bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-2 rounded-xl transition cursor-pointer text-center text-sm inline-block">
+                            📁 上載 Excel
+                            <input type="file" id="excel-upload" class="hidden" accept=".xlsx, .xls, .csv" onchange="teacherActions.handleFileUpload(event)">
+                        </label>
+                    </div>
+                    <div class="text-xs text-gray-500 mt-3 bg-gray-50 p-2 rounded">
+                        <strong>Excel 格式說明 (共6欄)：</strong><br>
+                        A欄: 題目 | B-E欄: 選項1至4 | F欄: 正確答案(1-4數字)
+                    </div>
+                </div>
+
+                <!-- 開設房間 -->
+                <div class="glass-panel p-6 rounded-2xl">
+                    <h3 class="text-xl font-bold mb-4 border-b pb-2">🚪 開設新房間</h3>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">選擇題庫</label>
+                            <select id="select-qset" class="w-full p-2 border rounded-xl focus:ring-2 focus:ring-green-500 outline-none"></select>
+                        </div>
+                        <div class="space-y-3">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">遊戲模式</label>
+                            <div class="flex gap-4">
+                                <label class="flex-1 flex items-center p-3 border rounded-xl cursor-pointer hover:bg-gray-50">
+                                    <input type="radio" name="room-type" value="solo" checked class="mr-2 text-green-600" onchange="document.getElementById('team-count-settings').classList.add('hidden')"> 👤 個人得分
+                                </label>
+                                <label class="flex-1 flex items-center p-3 border rounded-xl cursor-pointer hover:bg-gray-50">
+                                    <input type="radio" name="room-type" value="battle" class="mr-2 text-green-600" onchange="document.getElementById('team-count-settings').classList.remove('hidden')"> ⚔️ 小組對戰
+                                </label>
+                            </div>
+                            <!-- 動態顯示隊伍數量 -->
+                            <div id="team-count-settings" class="hidden bg-orange-50 p-3 rounded-xl border border-orange-200 flex items-center justify-between">
+                                <span class="text-sm font-bold text-orange-800">⚔️ 對戰隊伍數量 (2-35)：</span>
+                                <input type="number" id="input-team-count" min="2" max="35" value="4" class="p-2 border border-orange-300 rounded-lg outline-none font-bold text-orange-700 bg-white w-20 text-center">
+                            </div>
+                        </div>
+                        <button onclick="teacherActions.createRoom()" class="btn-press w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-3 px-4 rounded-xl transition text-lg shadow-md mt-2">
+                            立即開設房間
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="view-teacher-create-set" class="view-section hidden w-full max-w-2xl mx-auto glass-panel p-6 rounded-2xl">
+            <div class="flex justify-between items-center mb-6 border-b pb-4">
+                <h2 class="text-2xl font-bold text-gray-800">📝 新增題目 Set</h2>
+                <button onclick="appState.navigate('teacher-dashboard')" class="text-gray-500 hover:text-gray-700 font-medium">取消</button>
+            </div>
+            
+            <input type="text" id="new-set-title" placeholder="輸入題庫名稱 (例如：中一科學 第一章)" class="w-full p-3 text-lg border-2 rounded-xl focus:border-green-500 outline-none mb-6 font-bold">
+            
+            <div id="questions-container" class="space-y-6 mb-6 max-h-[50vh] overflow-y-auto p-2">
+                <!-- 動態新增的題目會在這裡 -->
+            </div>
+            
+            <div class="flex gap-4">
+                <button onclick="teacherActions.addQuestionField()" class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold py-3 px-4 rounded-xl border border-gray-300">
+                    + 增加一題
+                </button>
+                <button onclick="teacherActions.saveQuestionSet()" class="flex-1 bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 rounded-xl shadow-md">
+                    💾 儲存題庫
+                </button>
+            </div>
+        </div>
+
+        <div id="view-teacher-room" class="view-section hidden w-full space-y-4">
+            <div class="bg-indigo-600 text-white rounded-3xl p-8 text-center shadow-lg relative overflow-hidden">
+                <div class="absolute top-4 left-4">
+                    <button onclick="teacherActions.closeRoom()" class="bg-white/20 hover:bg-white/30 text-white text-sm py-1 px-3 rounded-full">結束並離開</button>
+                </div>
+                <h2 class="text-xl font-medium opacity-90 mb-2">請學生輸入此房間號碼加入</h2>
+                <div id="display-room-code" class="text-7xl font-black tracking-widest mb-4">----</div>
+                <div class="flex justify-center gap-4 text-lg">
+                    <span class="bg-white/20 px-4 py-1 rounded-full" id="display-room-mode">模式</span>
+                    <span class="bg-white/20 px-4 py-1 rounded-full"><span id="player-count">0</span> 人已加入</span>
+                </div>
+            </div>
+
+            <div class="glass-panel p-6 rounded-2xl flex justify-between items-center">
+                <div class="text-gray-600">
+                    狀態: <span id="room-status-badge" class="font-bold text-orange-500">等待學生加入中...</span>
+                </div>
+                <div class="space-x-3">
+                    <button id="btn-export-csv" onclick="teacherActions.exportCSV()" class="hidden bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-xl font-bold">📊 匯出 Google Sheet (CSV)</button>
+                    <button id="btn-start-game" onclick="teacherActions.startGame()" class="bg-blue-500 hover:bg-blue-600 text-white px-8 py-2 rounded-xl font-bold text-lg btn-press">開始遊戲 🚀</button>
+                </div>
+            </div>
+
+            <!-- 即時排行榜 / 對戰狀態 -->
+            <div class="grid md:grid-cols-2 gap-4" id="teacher-live-stats">
+                <!-- 動態注入內容 -->
+            </div>
+        </div>
+
+        <div id="view-student-join" class="view-section hidden w-full max-w-sm mx-auto text-center space-y-6 mt-10">
+            <h2 class="text-3xl font-bold text-orange-600 mb-8">🎓 進入課室</h2>
+            <div class="space-y-4 text-left">
+                <div>
+                    <label class="block text-sm font-bold text-gray-700 mb-1 pl-2">房間號碼 (Room Code)</label>
+                    <input type="text" id="student-code-input" maxlength="4" placeholder="例如: 1234" class="w-full p-4 text-center text-3xl font-black tracking-widest border-2 border-gray-300 rounded-2xl focus:border-orange-500 outline-none uppercase uppercase">
+                </div>
+                <div>
+                    <label class="block text-sm font-bold text-gray-700 mb-1 pl-2">你的名字 (姓名/學號)</label>
+                    <input type="text" id="student-name-input" placeholder="請輸入名字..." class="w-full p-4 text-lg border-2 border-gray-300 rounded-2xl focus:border-orange-500 outline-none">
+                </div>
+                <button onclick="studentActions.joinRoom()" class="btn-press w-full bg-orange-500 hover:bg-orange-600 text-white text-xl font-bold py-4 rounded-2xl shadow-lg mt-4">
+                    進入房間
+                </button>
+                <button onclick="appState.navigate('role-selection')" class="w-full text-gray-500 hover:text-gray-700 py-2">返回主頁</button>
+            </div>
+        </div>
+
+        <div id="view-student-lobby" class="view-section hidden w-full max-w-md mx-auto text-center space-y-6">
+            <div class="glass-panel p-8 rounded-3xl shadow-xl">
+                <div class="animate-pulse mb-6">
+                    <span class="text-6xl">⏳</span>
+                </div>
+                <h2 class="text-2xl font-bold text-gray-800 mb-2">已成功進入房間！</h2>
+                <p class="text-gray-500 mb-6">等待老師開始遊戲...</p>
+                
+                <div id="team-selection-area" class="hidden space-y-4">
+                    <h3 class="font-bold text-lg text-indigo-700 border-t pt-4">這是一場小組對戰！請選擇你的隊伍：</h3>
+                    <div class="grid grid-cols-2 md:grid-cols-3 gap-3 max-h-[50vh] overflow-y-auto no-scrollbar p-2" id="team-buttons-container">
+                        <!-- 隊伍按鈕動態注入 -->
+                    </div>
+                    <p id="selected-team-text" class="text-sm font-bold mt-2 text-gray-600 hidden">你已選擇：<span id="my-team-name"></span></p>
+                </div>
+            </div>
+        </div>
+
+        <div id="view-student-game" class="view-section hidden w-full max-w-2xl mx-auto flex flex-col h-[85vh]">
+            
+            <!-- 頂部狀態列 -->
+            <div class="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm mb-4">
+                <div class="font-bold text-gray-700">
+                    👤 <span id="st-display-name">學生</span>
+                    <span id="st-display-team" class="ml-2 px-2 py-1 rounded text-xs text-white hidden"></span>
+                </div>
+                <div class="font-black text-2xl text-green-600">
+                    分數: <span id="st-display-score">0</span>
+                </div>
+            </div>
+
+            <!-- 對戰模式的對手血量條 (僅對戰模式顯示) -->
+            <div id="st-battle-hud" class="hidden mb-4 flex flex-nowrap overflow-x-auto no-scrollbar gap-2 pb-2 items-center">
+                <!-- 動態血量條 -->
+            </div>
+
+            <!-- 題目區 -->
+            <div id="game-ended-msg" class="hidden flex-grow flex items-center justify-center glass-panel rounded-3xl p-8 text-center flex-col">
+                <span class="text-6xl mb-4">🎉</span>
+                <h2 class="text-3xl font-bold text-gray-800 mb-2">溫習完成！</h2>
+                <p class="text-gray-500 text-lg">請觀看老師螢幕上的最終結果。</p>
+            </div>
+
+            <div id="question-area" class="flex-grow flex flex-col glass-panel rounded-3xl p-6 shadow-md relative overflow-hidden">
+                <div class="text-sm font-bold text-gray-400 mb-2">第 <span id="q-current-num">1</span>/<span id="q-total-num">10</span> 題</div>
+                <h3 id="q-text" class="text-2xl font-bold text-gray-800 mb-8 flex-grow">題目內容載入中...</h3>
+                
+                <div id="q-options" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <!-- 選項動態注入 -->
+                </div>
+
+                <!-- 攻擊選擇遮罩 (僅對戰模式答對時出現) -->
+                <div id="attack-overlay" class="absolute inset-0 bg-white/95 backdrop-blur-sm z-10 hidden flex flex-col items-center justify-center p-6 text-center">
+                    <h3 class="text-3xl font-black text-red-600 mb-2">✅ 答對了！</h3>
+                    <p class="text-lg font-bold text-gray-700 mb-4">選擇你想攻擊的隊伍：</p>
+                    <div id="attack-targets" class="grid gap-3 w-full max-w-3xl max-h-[60vh] overflow-y-auto no-scrollbar p-4 grid-cols-2 sm:grid-cols-3 md:grid-cols-4">
+                        <!-- 目標按鈕 -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- 戰鬥動畫全熒幕遮罩 -->
+    <div id="battle-animation-overlay" class="fixed inset-0 bg-black/85 backdrop-blur-sm z-[300] hidden flex-col items-center justify-center overflow-hidden">
+        <div class="flex items-center justify-between w-full max-w-2xl px-8 relative">
+            
+            <!-- 攻擊方 (左側) -->
+            <div class="flex flex-col items-center z-20">
+                <div id="anim-attacker" class="text-[120px] filter drop-shadow-2xl z-20 transition-transform origin-center">🐉</div>
+                <div id="anim-attacker-name" class="mt-4 text-white font-bold text-2xl px-6 py-2 rounded-full shadow-lg border-2 border-white/20">火龍隊</div>
+            </div>
+            
+            <!-- 衝擊波/對抗字眼 -->
+            <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex-shrink-0 text-yellow-400 font-black italic text-7xl drop-shadow-[0_0_20px_rgba(255,255,0,0.8)]">
+                VS
+            </div>
+
+            <!-- 防守方 (右側) -->
+            <div class="flex flex-col items-center z-0">
+                <div id="anim-defender" class="text-[120px] filter drop-shadow-xl transition-transform origin-center">🦈</div>
+                <div id="anim-defender-name" class="mt-4 text-white font-bold text-2xl px-6 py-2 rounded-full shadow-lg border-2 border-white/20">冰鯊隊</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Excel 命名彈出視窗 -->
+    <div id="modal-excel-name" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] hidden items-center justify-center p-4">
+        <div class="bg-white p-6 rounded-2xl w-full max-w-md shadow-2xl">
+            <h3 class="text-2xl font-black text-gray-800 mb-2">🎉 檔案解析成功！</h3>
+            <p class="text-gray-600 mb-4">成功讀取了 <span id="excel-q-count" class="font-bold text-green-600 text-lg">0</span> 條有效題目。<br>請為這個題庫命名：</p>
+            <input type="text" id="excel-set-name" class="w-full p-4 border-2 border-gray-300 rounded-xl focus:border-green-500 outline-none mb-6 font-bold text-lg" placeholder="例如：中一科學 第一章">
+            <div class="flex gap-3">
+                <button onclick="teacherActions.cancelExcelUpload()" class="flex-1 py-3 text-gray-500 bg-gray-100 hover:bg-gray-200 font-bold rounded-xl transition">取消</button>
+                <button onclick="teacherActions.saveExcelUpload()" class="flex-1 bg-green-500 hover:bg-green-600 text-white py-3 rounded-xl font-bold transition shadow-md">💾 儲存題庫</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 關閉房間確認視窗 -->
+    <div id="modal-close-room" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] hidden items-center justify-center p-4">
+        <div class="bg-white p-6 rounded-2xl w-full max-w-sm shadow-2xl text-center">
+            <div class="text-red-500 text-6xl mb-4">⚠️</div>
+            <h3 class="text-xl font-bold text-gray-800 mb-2">確定結束並離開？</h3>
+            <p class="text-gray-500 mb-6">這會中斷所有學生的連線及未完成的遊戲。</p>
+            <div class="flex justify-center gap-3">
+                <button onclick="document.getElementById('modal-close-room').classList.add('hidden'); document.getElementById('modal-close-room').classList.remove('flex');" class="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold rounded-xl transition">取消</button>
+                <button onclick="teacherActions.confirmCloseRoom()" class="flex-1 bg-red-500 hover:bg-red-600 text-white py-3 rounded-xl font-bold transition shadow-md">確定結束</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 提示框組件 -->
+    <div id="toast-msg" class="fixed bottom-5 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-6 py-3 rounded-full shadow-xl transition-opacity duration-300 opacity-0 pointer-events-none z-[100]">
+        通知訊息
+    </div>
+
+    <!-- 戰鬥警報提示框 -->
+    <div id="battle-alert" class="fixed top-20 left-1/2 transform -translate-x-1/2 bg-red-600 text-white px-8 py-4 rounded-2xl shadow-2xl transition-all duration-300 opacity-0 pointer-events-none z-[200] translate-y-[-20px] font-black text-xl flex items-center gap-3 w-[90%] max-w-md justify-center">
+        <span class="text-3xl animate-bounce">💥</span> <span id="battle-alert-text">被攻擊了！</span>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDocs, collection, onSnapshot, updateDoc, increment } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // === 您專屬的 Firebase 設定 ===
+        const firebaseConfig = {
+            apiKey: "AIzaSyBBa9A3uFSP9srYcIqjoKvBxfnASpIaWKI",
+            authDomain: "study-platform-v5.firebaseapp.com",
+            projectId: "study-platform-v5",
+            storageBucket: "study-platform-v5.firebasestorage.app",
+            messagingSenderId: "21183812412",
+            appId: "1:21183812412:web:5fb79b1e4abdca3fa54439",
+            measurementId: "G-TNZBKYWLXM"
+        };
+        
+        // 幫你的平台取一個獨特的 ID
+        const appId = 'my-school-game-v1'; 
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        // 資料庫路徑定義
+        const PUBLIC_DATA_PATH = `artifacts/${appId}/public/data`;
+        const qSetsRef = collection(db, PUBLIC_DATA_PATH, 'questionSets');
+        const roomsRef = collection(db, PUBLIC_DATA_PATH, 'rooms');
+
+        // 全局狀態
+        window.appState = {
+            userId: null,
+            currentView: 'role-selection',
+            role: null, 
+            roomCode: null,
+            roomData: null,
+            myStudentData: { name: '', team: null, score: 0 },
+            currentQuestions: [],
+            currentQuestionIndex: 0,
+            unsubscribeRoom: null,
+
+            navigate: function(viewId) {
+                document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
+                const target = document.getElementById(`view-${viewId}`);
+                if(target) {
+                    target.classList.remove('hidden');
+                    this.currentView = viewId;
+                    if(viewId === 'teacher-dashboard') teacherActions.loadQuestionSets();
+                }
+            },
+            showToast: function(msg) {
+                const toast = document.getElementById('toast-msg');
+                toast.textContent = msg;
+                toast.classList.remove('opacity-0');
+                setTimeout(() => toast.classList.add('opacity-0'), 3000);
+            },
+            showBattleAlert: function(msg) {
+                const alertEl = document.getElementById('battle-alert');
+                document.getElementById('battle-alert-text').textContent = msg;
+                alertEl.classList.remove('opacity-0', 'translate-y-[-20px]');
+                alertEl.classList.add('opacity-100', 'translate-y-0');
+                setTimeout(() => {
+                    alertEl.classList.add('opacity-0', 'translate-y-[-20px]');
+                    alertEl.classList.remove('opacity-100', 'translate-y-0');
+                }, 4000); // 顯示 4 秒
+            },
+            lastMyTeamAttackTime: 0,
+            lastKnownHPs: {}, // 用於記錄所有隊伍的上一筆HP狀態，以判斷歸零廣播
+            generateId: () => Math.random().toString(36).substring(2, 9)
+        };
+
+        /* Tailwind 顏色白名單 */
+        const baseTeams = [
+            {n:"火龍", e:"🐉", c:"red"}, {n:"冰鯊", e:"🦈", c:"blue"}, {n:"森虎", e:"🐅", c:"green"}, {n:"雷鷹", e:"🦅", c:"yellow"},
+            {n:"戰狼", e:"🐺", c:"gray"}, {n:"巨熊", e:"🐻", c:"orange"}, {n:"狂獅", e:"🦁", c:"amber"}, {n:"毒蛇", e:"🐍", c:"lime"},
+            {n:"金剛", e:"🦍", c:"stone"}, {n:"猛象", e:"🐘", c:"slate"}, {n:"鐵犀", e:"🦏", c:"zinc"}, {n:"鱷魚", e:"🐊", c:"emerald"},
+            {n:"毒蠍", e:"🦂", c:"teal"}, {n:"狂蛛", e:"🕷️", c:"cyan"}, {n:"巨魷", e:"🐙", c:"sky"}, {n:"鐵蟹", e:"🦀", c:"indigo"},
+            {n:"暗蝠", e:"🦇", c:"violet"}, {n:"夜鴞", e:"🦉", c:"purple"}, {n:"飛鴨", e:"🦆", c:"fuchsia"}, {n:"企鵝", e:"🐧", c:"pink"},
+            {n:"神龜", e:"🐢", c:"rose"}, {n:"暴龍", e:"🦖", c:"red"}, {n:"鯨魚", e:"🐳", c:"blue"}, {n:"海豚", e:"🐬", c:"sky"},
+            {n:"神角", e:"🦄", c:"fuchsia"}, {n:"狂蜂", e:"🐝", c:"yellow"}, {n:"獵豹", e:"🐆", c:"orange"}, {n:"雄鹿", e:"🦌", c:"amber"},
+            {n:"駱駝", e:"🐪", c:"orange"}, {n:"斑馬", e:"🦓", c:"gray"}, {n:"袋鼠", e:"🦘", c:"amber"}, {n:"蜜獾", e:"🦡", c:"stone"},
+            {n:"水獺", e:"🦦", c:"amber"}, {n:"樹懶", e:"🦥", c:"lime"}, {n:"臭鼬", e:"🦨", c:"slate"}
+        ];
+        const teamsConfig = {};
+        // 自動生成最高 35 組隊伍設定
+        baseTeams.forEach((t, i) => {
+            teamsConfig[`team${i+1}`] = { name: `${t.n}隊`, color: `bg-${t.c}-500`, emoji: t.e };
+        });
+
+        async function initAuth() {
+            try {
+                await signInAnonymously(auth);
+                appState.userId = auth.currentUser.uid;
+                console.log("登入成功 UID:", appState.userId);
+            } catch (error) {
+                console.error("Auth error:", error);
+                appState.showToast("連線認證失敗，請重整網頁。");
+            }
+        }
+
+        window.teacherActions = {
+            addQuestionField: function(q = '', a1 = '', a2 = '', a3 = '', a4 = '', correct = '1') {
+                const container = document.getElementById('questions-container');
+                const id = appState.generateId();
+                const html = `
+                    <div class="bg-white p-4 rounded-xl border border-gray-200 relative q-item" data-id="${id}">
+                        <button onclick="this.parentElement.remove()" class="absolute top-2 right-2 text-red-500 font-bold hover:bg-red-50 p-1 rounded">刪除</button>
+                        <textarea class="w-full p-2 border rounded mb-3 q-text resize-none" placeholder="輸入題目內容...">${q}</textarea>
+                        <div class="grid grid-cols-2 gap-2 text-sm">
+                            <div class="flex items-center gap-2"><input type="radio" name="ans-${id}" value="1" ${correct==='1'?'checked':''}> <input type="text" class="border p-1 w-full rounded q-opt" placeholder="選項 1" value="${a1}"></div>
+                            <div class="flex items-center gap-2"><input type="radio" name="ans-${id}" value="2" ${correct==='2'?'checked':''}> <input type="text" class="border p-1 w-full rounded q-opt" placeholder="選項 2" value="${a2}"></div>
+                            <div class="flex items-center gap-2"><input type="radio" name="ans-${id}" value="3" ${correct==='3'?'checked':''}> <input type="text" class="border p-1 w-full rounded q-opt" placeholder="選項 3" value="${a3}"></div>
+                            <div class="flex items-center gap-2"><input type="radio" name="ans-${id}" value="4" ${correct==='4'?'checked':''}> <input type="text" class="border p-1 w-full rounded q-opt" placeholder="選項 4" value="${a4}"></div>
+                        </div>
+                    </div>
+                `;
+                container.insertAdjacentHTML('beforeend', html);
+            },
+            
+            saveQuestionSet: async function() {
+                if(!appState.userId) return;
+                const title = document.getElementById('new-set-title').value.trim();
+                if(!title) return appState.showToast("請輸入題庫名稱");
+
+                const qItems = document.querySelectorAll('.q-item');
+                const questions = [];
+                let valid = true;
+
+                qItems.forEach(item => {
+                    const id = item.dataset.id;
+                    const text = item.querySelector('.q-text').value.trim();
+                    const opts = Array.from(item.querySelectorAll('.q-opt')).map(i => i.value.trim());
+                    const correctEl = item.querySelector(`input[name="ans-${id}"]:checked`);
+                    
+                    if(!text || opts.some(o => !o) || !correctEl) valid = false;
+                    
+                    questions.push({
+                        q: text,
+                        options: opts,
+                        correct: correctEl ? parseInt(correctEl.value) - 1 : 0
+                    });
+                });
+
+                if(questions.length === 0) return appState.showToast("請至少新增一題");
+                if(!valid) return appState.showToast("請確認所有題目及選項已填寫，且選擇了正確答案");
+
+                try {
+                    const setId = 'set_' + Date.now();
+                    await setDoc(doc(db, PUBLIC_DATA_PATH, 'questionSets', setId), {
+                        title: title,
+                        questions: questions,
+                        teacherId: appState.userId,
+                        createdAt: new Date().toISOString()
+                    });
+                    appState.showToast("題庫儲存成功！");
+                    
+                    document.getElementById('new-set-title').value = '';
+                    document.getElementById('questions-container').innerHTML = '';
+                    this.addQuestionField();
+                    
+                    appState.navigate('teacher-dashboard');
+                } catch(e) {
+                    console.error(e);
+                    appState.showToast("儲存失敗");
+                }
+            },
+
+            loadQuestionSets: async function() {
+                if(!appState.userId) return;
+                const list = document.getElementById('question-sets-list');
+                const select = document.getElementById('select-qset');
+                list.innerHTML = '載入中...';
+                
+                try {
+                    const snap = await getDocs(qSetsRef);
+                    let html = '';
+                    let optionsHtml = '';
+                    let count = 0;
+                    
+                    snap.forEach(d => {
+                        const data = d.data();
+                        if(data.teacherId === appState.userId) {
+                            count++;
+                            html += `
+                                <div class="bg-white p-3 rounded-xl border flex justify-between items-center shadow-sm">
+                                    <div>
+                                        <div class="font-bold">${data.title}</div>
+                                        <div class="text-xs text-gray-500">共 ${data.questions.length} 題</div>
+                                    </div>
+                                </div>`;
+                            optionsHtml += `<option value="${d.id}">${data.title}</option>`;
+                        }
+                    });
+                    if(count === 0) {
+                        list.innerHTML = '<div class="text-center text-gray-400 py-2">尚未建立任何題庫</div>';
+                        select.innerHTML = '<option value="">請先建立題庫</option>';
+                    } else {
+                        list.innerHTML = html;
+                        select.innerHTML = optionsHtml;
+                    }
+                } catch (e) {
+                    console.error(e);
+                    list.innerHTML = '載入失敗';
+                }
+            },
+
+            tempExcelQuestions: null,
+
+            handleFileUpload: async function(event) {
+                const file = event.target.files[0];
+                if(!file) return;
+
+                appState.showToast("正在解析 Excel 檔案...");
+                const reader = new FileReader();
+                
+                reader.onload = async (e) => {
+                    try {
+                        const data = new Uint8Array(e.target.result);
+                        const workbook = XLSX.read(data, {type: 'array'});
+                        const firstSheetName = workbook.SheetNames[0];
+                        const worksheet = workbook.Sheets[firstSheetName];
+                        const json = XLSX.utils.sheet_to_json(worksheet, {header: 1}); 
+
+                        if(json.length <= 1) return appState.showToast("檔案內沒有題目資料 (請確保第一行為標題，第二行開始為題目)");
+
+                        const questions = [];
+                        
+                        for(let i = 1; i < json.length; i++) {
+                            const row = json[i];
+                            if(!row || row.length < 6 || !row[0]) continue; 
+
+                            const q = String(row[0] || '').trim();
+                            const a1 = String(row[1] || '').trim();
+                            const a2 = String(row[2] || '').trim();
+                            const a3 = String(row[3] || '').trim();
+                            const a4 = String(row[4] || '').trim();
+                            const correctVal = parseInt(row[5]);
+
+                            if(q && a1 && a2 && a3 && a4 && !isNaN(correctVal) && correctVal >= 1 && correctVal <= 4) {
+                                questions.push({
+                                    q: q,
+                                    options: [a1, a2, a3, a4],
+                                    correct: correctVal - 1
+                                });
+                            }
+                        }
+
+                        if(questions.length === 0) {
+                            return appState.showToast("未能讀取有效題目，請檢查格式是否符合說明。");
+                        }
+
+                        this.tempExcelQuestions = questions;
+                        document.getElementById('excel-q-count').textContent = questions.length;
+                        document.getElementById('excel-set-name').value = file.name.replace(/\.[^/.]+$/, "");
+                        
+                        document.getElementById('modal-excel-name').classList.remove('hidden');
+                        document.getElementById('modal-excel-name').classList.add('flex');
+
+                    } catch(err) {
+                        console.error(err);
+                        appState.showToast("讀取檔案失敗，請確保格式為 Excel (.xlsx) 或 CSV。");
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+            },
+
+            cancelExcelUpload: function() {
+                this.tempExcelQuestions = null;
+                document.getElementById('modal-excel-name').classList.add('hidden');
+                document.getElementById('modal-excel-name').classList.remove('flex');
+                document.getElementById('excel-upload').value = ''; 
+                appState.showToast("已取消上載");
+            },
+
+            saveExcelUpload: async function() {
+                const title = document.getElementById('excel-set-name').value.trim();
+                if(!title) return appState.showToast("請輸入題庫名稱");
+                if(!this.tempExcelQuestions) return;
+
+                try {
+                    const setId = 'set_' + Date.now();
+                    await setDoc(doc(db, PUBLIC_DATA_PATH, 'questionSets', setId), {
+                        title: title,
+                        questions: this.tempExcelQuestions,
+                        teacherId: appState.userId,
+                        createdAt: new Date().toISOString()
+                    });
+                    
+                    appState.showToast("✅ Excel 題庫上載成功！");
+                    this.loadQuestionSets(); 
+                    this.cancelExcelUpload(); 
+                } catch(err) {
+                    console.error(err);
+                    appState.showToast("儲存失敗，請重試。");
+                }
+            },
+
+            createRoom: async function() {
+                if(!appState.userId) return;
+                const setId = document.getElementById('select-qset').value;
+                const type = document.querySelector('input[name="room-type"]:checked').value;
+                const teamCount = parseInt(document.getElementById('input-team-count').value);
+                
+                if(!setId) return appState.showToast("請選擇一個題庫");
+                if (type === 'battle' && (isNaN(teamCount) || teamCount < 2 || teamCount > 35)) {
+                    return appState.showToast("隊伍數量必須在 2 至 35 之間");
+                }
+
+                const roomCode = Math.floor(1000 + Math.random() * 9000).toString();
+                
+                let activeTeams = {};
+                if (type === 'battle') {
+                    const availableTeams = Object.keys(teamsConfig).slice(0, teamCount);
+                    availableTeams.forEach(t => activeTeams[t] = { hp: 100, lastAttackTime: 0, lastAttackedBy: null });
+                }
+
+                const roomData = {
+                    setId: setId,
+                    type: type,
+                    teacherId: appState.userId,
+                    status: 'waiting', 
+                    players: {}, 
+                    teams: activeTeams,
+                    createdAt: new Date().toISOString()
+                };
+
+                try {
+                    await setDoc(doc(db, PUBLIC_DATA_PATH, 'rooms', roomCode), roomData);
+                    appState.roomCode = roomCode;
+                    this.setupTeacherRoomListener(roomCode);
+                    
+                    document.getElementById('display-room-code').textContent = roomCode;
+                    document.getElementById('display-room-mode').textContent = type === 'solo' ? '👤 個人得分' : `⚔ 小組對戰 (${teamCount}組)`;
+                    
+                    const startBtn = document.getElementById('btn-start-game');
+                    startBtn.classList.remove('hidden');
+                    startBtn.textContent = '開始遊戲 🚀';
+                    startBtn.onclick = teacherActions.startGame;
+                    startBtn.classList.remove('bg-red-500', 'hover:bg-red-600');
+                    startBtn.classList.add('bg-blue-500', 'hover:bg-blue-600');
+                    
+                    document.getElementById('btn-export-csv').classList.add('hidden');
+                    document.getElementById('room-status-badge').textContent = '等待學生加入中...';
+                    
+                    appState.navigate('teacher-room');
+                } catch(e) {
+                    console.error(e);
+                    appState.showToast("開設房間失敗");
+                }
+            },
+
+            setupTeacherRoomListener: function(code) {
+                if(appState.unsubscribeRoom) appState.unsubscribeRoom();
+                
+                appState.unsubscribeRoom = onSnapshot(doc(db, PUBLIC_DATA_PATH, 'rooms', code), (docSnap) => {
+                    if(!docSnap.exists()) return;
+                    const data = docSnap.data();
+                    appState.roomData = data;
+                    
+                    const players = Object.values(data.players || {});
+                    document.getElementById('player-count').textContent = players.length;
+
+                    const statsDiv = document.getElementById('teacher-live-stats');
+                    
+                    if(data.type === 'solo') {
+                        let sortedPlayers = players.sort((a,b) => b.score - a.score);
+                        let html = `<div class="col-span-2 glass-panel p-4 rounded-xl"><h3 class="font-bold text-lg mb-3">🏆 即時排行榜</h3><div class="space-y-2">`;
+                        if(sortedPlayers.length === 0) html += `<div class="text-gray-400 text-center">尚無學生加入</div>`;
+                        sortedPlayers.forEach((p, idx) => {
+                            html += `<div class="flex justify-between p-2 ${idx%2===0?'bg-white':'bg-gray-50'} rounded"><span>${idx+1}. ${p.name}</span> <span class="font-bold text-green-600">${p.score} 分</span></div>`;
+                        });
+                        html += `</div></div>`;
+                        statsDiv.innerHTML = html;
+                    } else {
+                        let html = '';
+                        Object.keys(data.teams || {}).forEach(t => {
+                            const teamData = data.teams[t] || { hp: 100 };
+                            const tConf = teamsConfig[t];
+                            const tPlayers = players.filter(p => p.team === t);
+                            const hpPercent = Math.max(0, teamData.hp);
+                            
+                            let warningClass = hpPercent <= 30 && hpPercent > 0 ? 'danger-hp' : '';
+                            if(hpPercent <= 0) warningClass = 'opacity-50 grayscale';
+                            
+                            html += `
+                                <div class="bg-white p-4 rounded-xl border-t-4 border-${tConf.color.replace('bg-','')} shadow-sm transition-all ${warningClass}">
+                                    <div class="flex justify-between items-center mb-2">
+                                        <div class="font-bold text-xl">${tConf.emoji} ${tConf.name}</div>
+                                        <div class="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded-md">${tPlayers.length} 名成員</div>
+                                    </div>
+                                    <div class="w-full bg-gray-200 rounded-full h-5 mb-2 overflow-hidden shadow-inner">
+                                        <div class="${tConf.color} h-5 transition-all duration-300" style="width: ${hpPercent}%"></div>
+                                    </div>
+                                    <div class="font-black text-right text-lg ${hpPercent <= 30 ? 'text-red-600' : 'text-gray-700'}">HP: ${hpPercent} ${hpPercent<=0?'(陣亡)':''}</div>
+                                    <div class="text-xs text-gray-500 mt-2 truncate border-t pt-2">
+                                        成員: ${tPlayers.map(p=>p.name).join(', ') || '無'}
+                                    </div>
+                                </div>
+                            `;
+                        });
+                        statsDiv.innerHTML = html;
+                    }
+
+                    if(data.status === 'finished') {
+                         document.getElementById('room-status-badge').textContent = '遊戲結束';
+                         document.getElementById('btn-start-game').classList.add('hidden');
+                         document.getElementById('btn-export-csv').classList.remove('hidden');
+                    }
+                }, (error) => {
+                    console.error("Room listener error:", error);
+                });
+            },
+
+            startGame: async function() {
+                if(!appState.roomCode || !appState.userId) return;
+                try {
+                    await updateDoc(doc(db, PUBLIC_DATA_PATH, 'rooms', appState.roomCode), {
+                        status: 'playing'
+                    });
+                    document.getElementById('room-status-badge').textContent = '遊戲進行中 🎮';
+                    document.getElementById('btn-start-game').textContent = '結束遊戲 🛑';
+                    document.getElementById('btn-start-game').onclick = teacherActions.endGame;
+                    document.getElementById('btn-start-game').classList.replace('bg-blue-500', 'bg-red-500');
+                    document.getElementById('btn-start-game').classList.replace('hover:bg-blue-600', 'hover:bg-red-600');
+                } catch(e) {
+                    console.error(e);
+                }
+            },
+
+            endGame: async function() {
+                if(!appState.roomCode || !appState.userId) return;
+                try {
+                    await updateDoc(doc(db, PUBLIC_DATA_PATH, 'rooms', appState.roomCode), {
+                        status: 'finished'
+                    });
+                    appState.showToast("遊戲已結束！");
+                } catch(e) {
+                    console.error(e);
+                }
+            },
+
+            closeRoom: function() {
+                document.getElementById('modal-close-room').classList.remove('hidden');
+                document.getElementById('modal-close-room').classList.add('flex');
+            },
+
+            confirmCloseRoom: function() {
+                document.getElementById('modal-close-room').classList.add('hidden');
+                document.getElementById('modal-close-room').classList.remove('flex');
+                
+                if(appState.unsubscribeRoom) appState.unsubscribeRoom();
+                appState.roomCode = null;
+                appState.navigate('teacher-dashboard');
+            },
+
+            exportCSV: function() {
+                if(!appState.roomData) return;
+                const d = appState.roomData;
+                let csv = "\uFEFF"; 
+                
+                if(d.type === 'solo') {
+                    csv += "排名,姓名,分數\n";
+                    const players = Object.values(d.players).sort((a,b) => b.score - a.score);
+                    players.forEach((p, i) => {
+                        csv += `${i+1},${p.name},${p.score}\n`;
+                    });
+                } else {
+                    csv += "隊伍,隊伍剩餘HP,學生姓名,個人答對題數(分數)\n";
+                    const players = Object.values(d.players);
+                    Object.keys(d.teams || {}).forEach(t => {
+                        const tConf = teamsConfig[t];
+                        const hp = d.teams[t] ? d.teams[t].hp : 0;
+                        const tPlayers = players.filter(p => p.team === t);
+                        tPlayers.forEach(p => {
+                            csv += `${tConf.name},${hp},${p.name},${p.score}\n`;
+                        });
+                        if(tPlayers.length === 0) {
+                            csv += `${tConf.name},${hp},無成員,-\n`;
+                        }
+                    });
+                }
+
+                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `成績匯出_房間${appState.roomCode}_${new Date().toISOString().split('T')[0]}.csv`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            }
+        };
+
+        window.studentActions = {
+            joinRoom: async function() {
+                if(!appState.userId) return;
+                const code = document.getElementById('student-code-input').value.trim().toUpperCase();
+                const name = document.getElementById('student-name-input').value.trim();
+
+                if(code.length !== 4) return appState.showToast("請輸入4位數房間碼");
+                if(!name) return appState.showToast("請輸入名字");
+
+                try {
+                    appState.roomCode = code;
+                    appState.myStudentData.name = name;
+                    appState.myStudentData.score = 0;
+
+                    this.setupStudentRoomListener(code);
+                    appState.navigate('student-lobby');
+
+                } catch(e) {
+                    console.error(e);
+                    appState.showToast("發生錯誤，請重試");
+                }
+            },
+
+            setupStudentRoomListener: function(code) {
+                if(appState.unsubscribeRoom) appState.unsubscribeRoom();
+                
+                let isFirstLoad = true;
+
+                appState.unsubscribeRoom = onSnapshot(doc(db, PUBLIC_DATA_PATH, 'rooms', code), async (docSnap) => {
+                    if(!docSnap.exists()) {
+                        appState.showToast("找不到此房間，可能已關閉");
+                        appState.navigate('student-join');
+                        return;
+                    }
+                    const data = docSnap.data();
+                    appState.roomData = data;
+
+                    // 偵測是否有隊伍 HP 歸零，並發送全局廣播通知
+                    if (data.type === 'battle' && data.teams) {
+                        Object.keys(data.teams).forEach(teamKey => {
+                            const currentHp = data.teams[teamKey].hp;
+                            const previousHp = appState.lastKnownHPs[teamKey];
+                            
+                            // 若之前HP大於0，現在小於或等於0，代表剛剛陣亡
+                            if (previousHp !== undefined && previousHp > 0 && currentHp <= 0) {
+                                const deadTeam = teamsConfig[teamKey];
+                                appState.showBattleAlert(`☠️ 廣播：${deadTeam.emoji} ${deadTeam.name} 已被擊退 (HP 歸零)！`);
+                            }
+                            appState.lastKnownHPs[teamKey] = currentHp;
+                        });
+                    }
+
+                    // 偵測是否被攻擊
+                    if(data.type === 'battle' && appState.myStudentData.team && !isFirstLoad) {
+                        const myTeamData = data.teams[appState.myStudentData.team];
+                        if (myTeamData && myTeamData.lastAttackTime > (appState.lastMyTeamAttackTime || 0)) {
+                            if (appState.lastMyTeamAttackTime !== 0) { 
+                                const attacker = teamsConfig[myTeamData.lastAttackedBy];
+                                if (attacker) {
+                                    appState.showBattleAlert(`⚠️ 遭到 ${attacker.emoji} ${attacker.name} 攻擊！`);
+                                    const qArea = document.getElementById('question-area');
+                                    if(qArea) {
+                                        qArea.classList.add('anim-damage');
+                                        setTimeout(() => qArea.classList.remove('anim-damage'), 600);
+                                    }
+                                }
+                            }
+                            appState.lastMyTeamAttackTime = myTeamData.lastAttackTime;
+                        }
+                    }
+
+                    if(isFirstLoad) {
+                        isFirstLoad = false;
+                        
+                        if(data.type === 'battle') {
+                            document.getElementById('team-selection-area').classList.remove('hidden');
+                            this.renderTeamButtons();
+                            if (appState.myStudentData.team && data.teams[appState.myStudentData.team]) {
+                                appState.lastMyTeamAttackTime = data.teams[appState.myStudentData.team].lastAttackTime || 0;
+                            }
+                        } else {
+                            await this.updateMyDataInDB();
+                        }
+                        
+                        await this.fetchQuestions(data.setId);
+                    }
+
+                    if(data.status === 'playing' && appState.currentView === 'student-lobby') {
+                        if(data.type === 'battle' && !appState.myStudentData.team) {
+                            appState.showToast("遊戲已開始，但你尚未選擇隊伍！系統為你隨機分配。");
+                            const tKeys = Object.keys(data.teams || {});
+                            this.selectTeam(tKeys[Math.floor(Math.random() * tKeys.length)]);
+                        }
+                        this.startGameplay();
+                    } else if (data.status === 'finished' && appState.currentView === 'student-game') {
+                        document.getElementById('question-area').classList.add('hidden');
+                        document.getElementById('game-ended-msg').classList.remove('hidden');
+                        document.getElementById('game-ended-msg').classList.add('flex');
+                    }
+
+                    if(data.type === 'battle' && appState.currentView === 'student-game') {
+                        this.updateBattleHUD();
+                    }
+                }, (error) => {
+                    console.error("Student listener error:", error);
+                    appState.showToast("連線中斷");
+                });
+            },
+
+            renderTeamButtons: function() {
+                const container = document.getElementById('team-buttons-container');
+                container.className = 'grid grid-cols-2 md:grid-cols-3 gap-3 max-h-[50vh] overflow-y-auto no-scrollbar p-2';
+                let html = '';
+                const activeTeams = appState.roomData.teams || {};
+                Object.keys(activeTeams).forEach(t => {
+                    const c = teamsConfig[t];
+                    html += `
+                        <button onclick="studentActions.selectTeam('${t}')" class="btn-press ${c.color} text-white font-bold py-3 rounded-xl shadow flex flex-col items-center justify-center gap-1">
+                            <span class="text-3xl">${c.emoji}</span>
+                            <span>${c.name}</span>
+                        </button>
+                    `;
+                });
+                container.innerHTML = html;
+            },
+
+            selectTeam: async function(teamId) {
+                appState.myStudentData.team = teamId;
+                const c = teamsConfig[teamId];
+                document.getElementById('selected-team-text').classList.remove('hidden');
+                document.getElementById('my-team-name').textContent = c.emoji + ' ' + c.name;
+                document.getElementById('my-team-name').className = 'text-' + c.color.replace('bg-','') + '-600';
+                
+                if (appState.roomData && appState.roomData.teams[teamId]) {
+                    appState.lastMyTeamAttackTime = appState.roomData.teams[teamId].lastAttackTime || 0;
+                }
+
+                await this.updateMyDataInDB();
+            },
+
+            updateMyDataInDB: async function() {
+                if(!appState.userId || !appState.roomCode) return;
+                try {
+                    const roomRef = doc(db, PUBLIC_DATA_PATH, 'rooms', appState.roomCode);
+                    const updateData = {};
+                    updateData[`players.${appState.userId}`] = appState.myStudentData;
+                    await updateDoc(roomRef, updateData);
+                } catch (e) {
+                    console.error("Error updating student data:", e);
+                }
+            },
+
+            fetchQuestions: async function(setId) {
+                try {
+                    const qDoc = await getDocs(qSetsRef);
+                    qDoc.forEach(d => {
+                        if(d.id === setId) {
+                            appState.currentQuestions = d.data().questions.sort(() => Math.random() - 0.5);
+                        }
+                    });
+                } catch(e) {
+                    console.error(e);
+                }
+            },
+
+            startGameplay: function() {
+                appState.navigate('student-game');
+                appState.currentQuestionIndex = 0;
+                
+                document.getElementById('st-display-name').textContent = appState.myStudentData.name;
+                
+                if(appState.roomData.type === 'battle') {
+                    const tConf = teamsConfig[appState.myStudentData.team];
+                    const tBadge = document.getElementById('st-display-team');
+                    tBadge.textContent = tConf.emoji + tConf.name;
+                    tBadge.className = `ml-2 px-2 py-1 rounded text-xs text-white ${tConf.color}`;
+                    tBadge.classList.remove('hidden');
+                    
+                    document.getElementById('st-battle-hud').classList.remove('hidden');
+                    this.updateBattleHUD();
+                }
+
+                this.renderQuestion();
+            },
+
+            renderQuestion: function() {
+                if(appState.currentQuestionIndex >= appState.currentQuestions.length) {
+                    appState.currentQuestionIndex = 0; 
+                }
+
+                const q = appState.currentQuestions[appState.currentQuestionIndex];
+                document.getElementById('q-current-num').textContent = appState.currentQuestionIndex + 1;
+                document.getElementById('q-total-num').textContent = appState.currentQuestions.length;
+                document.getElementById('q-text').textContent = q.q;
+
+                const optsContainer = document.getElementById('q-options');
+                optsContainer.innerHTML = '';
+                
+                q.options.forEach((opt, idx) => {
+                    const btn = document.createElement('button');
+                    btn.className = "btn-press bg-white border-2 border-indigo-100 hover:border-indigo-50 hover:bg-indigo-50 text-gray-700 font-bold py-4 px-4 rounded-2xl text-left text-lg shadow-sm transition-colors w-full";
+                    btn.textContent = opt;
+                    btn.onclick = () => this.handleAnswer(idx, q.correct, btn);
+                    optsContainer.appendChild(btn);
+                });
+            },
+
+            handleAnswer: async function(selectedIdx, correctIdx, btnElement) {
+                document.querySelectorAll('#q-options button').forEach(b => b.disabled = true);
+
+                if(selectedIdx === correctIdx) {
+                    btnElement.classList.replace('border-indigo-100', 'border-green-500');
+                    btnElement.classList.replace('bg-white', 'bg-green-100');
+                    
+                    appState.myStudentData.score += 10;
+                    document.getElementById('st-display-score').textContent = appState.myStudentData.score;
+                    
+                    if(appState.roomData.type === 'solo') {
+                        await this.updateMyDataInDB();
+                        setTimeout(() => this.nextQuestion(), 1000);
+                    } else {
+                        this.showAttackOverlay();
+                        await this.updateMyDataInDB(); 
+                    }
+                } else {
+                    btnElement.classList.replace('border-indigo-100', 'border-red-500');
+                    btnElement.classList.replace('bg-white', 'bg-red-100');
+                    btnElement.classList.add('shake');
+                    
+                    const correctBtn = document.querySelectorAll('#q-options button')[correctIdx];
+                    if(correctBtn) {
+                        correctBtn.classList.replace('border-indigo-100', 'border-green-500');
+                        correctBtn.classList.replace('bg-white', 'bg-green-50');
+                    }
+
+                    setTimeout(() => this.nextQuestion(), 1500);
+                }
+            },
+
+            nextQuestion: function() {
+                appState.currentQuestionIndex++;
+                this.renderQuestion();
+            },
+
+            updateBattleHUD: function() {
+                const container = document.getElementById('st-battle-hud');
+                let html = '';
+                const d = appState.roomData;
+                const myTeamId = appState.myStudentData.team;
+                
+                container.className = 'mb-4 flex flex-nowrap overflow-x-auto no-scrollbar gap-2 pb-2 items-center justify-center';
+                
+                if (myTeamId && d.teams && d.teams[myTeamId]) {
+                    const conf = teamsConfig[myTeamId];
+                    const hp = d.teams[myTeamId].hp;
+                    const hpPercent = Math.max(0, hp);
+                    
+                    let warningClass = hpPercent <= 30 && hpPercent > 0 ? 'danger-hp text-red-500' : 'border-gray-200';
+                    let myTeamClass = 'border-2 border-indigo-500 shadow-md transform scale-105 w-full max-w-sm';
+                    
+                    html = `
+                        <div class="flex-shrink-0 bg-white p-3 rounded-xl text-center ${myTeamClass} ${warningClass} transition-all">
+                            <div class="text-sm font-black mb-2 truncate text-lg">${conf.emoji} 我的隊伍 HP: ${hp}</div>
+                            <div class="w-full bg-gray-100 h-3 rounded-full overflow-hidden">
+                                <div class="${conf.color} h-3 transition-all duration-300" style="width: ${hpPercent}%"></div>
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                container.innerHTML = html;
+            },
+
+            showAttackOverlay: function() {
+                const overlay = document.getElementById('attack-overlay');
+                const targets = document.getElementById('attack-targets');
+                
+                let html = '';
+                const activeTeams = appState.roomData.teams || {};
+                
+                targets.className = `grid gap-3 w-full max-w-3xl max-h-[60vh] overflow-y-auto no-scrollbar p-4 ${Object.keys(activeTeams).length <= 4 ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4'}`;
+
+                Object.keys(activeTeams).forEach(t => {
+                    if(t === appState.myStudentData.team) return;
+                    if(activeTeams[t].hp <= 0) return; // 略過已經 HP 歸零的隊伍
+                    
+                    const c = teamsConfig[t];
+                    html += `
+                        <button onclick="studentActions.executeAttack('${t}')" class="btn-press ${c.color} text-white font-bold py-4 rounded-xl shadow-lg text-lg flex flex-col items-center gap-1 border-b-4 border-black/20 hover:border-black/40">
+                            <span class="text-3xl">${c.emoji}</span>
+                            <span>攻擊 ${c.name}</span>
+                        </button>
+                    `;
+                });
+                
+                // 如果所有對手都已經陣亡的防呆畫面
+                if (html === '') {
+                    html = '<div class="col-span-full text-center text-xl font-bold text-gray-500 py-8">所有對手已被擊退！🎉<br>請繼續答題爭取個人分數！</div>';
+                    setTimeout(() => {
+                        document.getElementById('attack-overlay').classList.add('hidden');
+                        this.nextQuestion();
+                    }, 3000); // 顯示 3 秒後自動進下一題
+                }
+                
+                targets.innerHTML = html;
+                overlay.classList.remove('hidden');
+            },
+
+            executeAttack: async function(targetTeam) {
+                document.getElementById('attack-overlay').classList.add('hidden');
+                
+                if(!appState.userId || !appState.roomCode) return;
+
+                const animOverlay = document.getElementById('battle-animation-overlay');
+                const attacker = document.getElementById('anim-attacker');
+                const defender = document.getElementById('anim-defender');
+                
+                const myTeamConf = teamsConfig[appState.myStudentData.team];
+                const targetTeamConf = teamsConfig[targetTeam];
+                
+                attacker.textContent = myTeamConf.emoji;
+                document.getElementById('anim-attacker-name').textContent = myTeamConf.name;
+                document.getElementById('anim-attacker-name').className = `mt-4 text-white font-bold text-2xl px-6 py-2 rounded-full shadow-lg border-2 border-white/20 ${myTeamConf.color}`;
+
+                defender.textContent = targetTeamConf.emoji;
+                document.getElementById('anim-defender-name').textContent = targetTeamConf.name;
+                document.getElementById('anim-defender-name').className = `mt-4 text-white font-bold text-2xl px-6 py-2 rounded-full shadow-lg border-2 border-white/20 ${targetTeamConf.color}`;
+
+                attacker.classList.remove('anim-attack');
+                defender.classList.remove('anim-damage');
+                
+                animOverlay.classList.remove('hidden');
+                animOverlay.classList.add('flex');
+                
+                void attacker.offsetWidth; // 觸發重繪
+                
+                attacker.classList.add('anim-attack');
+                
+                setTimeout(() => {
+                    defender.classList.add('anim-damage');
+                }, 400);
+
+                try {
+                    setTimeout(async () => {
+                        animOverlay.classList.add('hidden');
+                        animOverlay.classList.remove('flex');
+                        
+                        const roomRef = doc(db, PUBLIC_DATA_PATH, 'rooms', appState.roomCode);
+                        const updateData = {};
+                        updateData[`teams.${targetTeam}.hp`] = increment(-10);
+                        updateData[`teams.${targetTeam}.lastAttackedBy`] = appState.myStudentData.team;
+                        updateData[`teams.${targetTeam}.lastAttackTime`] = Date.now();
+                        await updateDoc(roomRef, updateData);
+                        
+                        appState.showToast(`💥 已成功重擊 ${targetTeamConf.name}!`);
+                        
+                        this.nextQuestion();
+                    }, 1200); 
+                } catch(e) {
+                    console.error("Attack error:", e);
+                    animOverlay.classList.add('hidden');
+                    animOverlay.classList.remove('flex');
+                    this.nextQuestion();
+                }
+            }
+        };
+
+        window.onload = async () => {
+            teacherActions.addQuestionField();
+            await initAuth();
+        };
+
+    </script>
+</body>
+</html>
